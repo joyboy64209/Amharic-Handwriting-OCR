@@ -1,0 +1,13 @@
+# Amharic Handwriting OCR — Python dependencies
+# Install in a virtual environment (see setup.ps1 / run.ps1):
+#   python -m pip install -r requirements.txt
+
+torch>=2.0
+torchvision>=0.15
+numpy
+Pillow
+opencv-python-headless
+fastapi
+uvicorn[standard]
+python-multipart
+pyyaml

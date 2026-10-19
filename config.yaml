@@ -1,0 +1,61 @@
+# Amharic Handwriting OCR configuration
+# All paths are relative to the project root unless marked absolute.
+
+project_root: .
+
+data:
+  # Root folder containing one sub-folder per Amharic character class
+  # (e.g. data/uni_dataset/ሀ/001he.1.jpg). Copied from the source clone.
+  char_dataset_dir: data/uni_dataset
+  # Optional JSONL file for labeled text-line images: each line is
+  #   <relative_image_path>\t<amharic unicode text>
+  line_labels_file: data/lines.jsonl
+  line_images_dir: data/lines
+
+models:
+  # Trained CNN checkpoint (isolated-character baseline). Copied from the
+  # source clone's assets/amharic_ocr_v2.pth.
+  cnn_checkpoint: models/amharic_ocr_v2.pth
+  # Trained CRNN checkpoint (sequence/CTC line recognition). Not supplied;
+  # train with scripts/train_crnn.py once line data is available.
+  crnn_checkpoint: models/crnn_amharic_line.pth
+
+preprocessing:
+  # CNN input geometry (matches the supplied checkpoint).
+  img_height: 28
+  img_width: 28
+  # Normalization statistics computed over the training split.
+  mean: 0.239
+  std: 0.407
+  # Deskew: angles beyond this (degrees) are left untouched to avoid
+  # over-rotating genuinely slanted handwriting.
+  max_skew_angle: 45
+
+training:
+  batch_size: 64
+  epochs: 20
+  lr: 0.001
+  # 80/20 train/validation split. Writer-separated when writer identity can
+  # be derived from the image filename prefix; otherwise stratified random.
+  val_split: 0.2
+  seed: 42
+  # Augmentation probabilities (handwriting-friendly, modest).
+  rotation_degrees: 8
+  scale: 0.95
+  shear_degrees: 4
+  brightness: 0.15
+
+inference:
+  # Default recognition mode: 'char' (whole image -> one character) or
+  # 'line' (detect text lines, CRNN+CTC per line). Line mode is recommended
+  # for documents; char mode for isolated characters.
+  default_mode: char
+  # Confidence threshold below which the API returns a low-confidence warning.
+  low_confidence_threshold: 0.60
+
+api:
+  # Maximum upload size in bytes (~2 MB).
+  max_upload_bytes: 2097152
+  allowed_extensions: [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"]
+  server_host: 127.0.0.1
+  server_port: 8000

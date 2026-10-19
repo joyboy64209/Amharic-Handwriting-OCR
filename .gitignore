@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.so
+.env
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+
+# PyTorch / model checkpoints (large binary; keep the supplied one, ignore user-trained)
+*.pth
+!models/amharic_ocr_v2.pth
+
+# Data (large; keep the supplied dataset, ignore user additions)
+data/uni_dataset/**/*
+data/lines/**/*
+data/split_manifest.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend
+frontend/node_modules/
+frontend/package-lock.json

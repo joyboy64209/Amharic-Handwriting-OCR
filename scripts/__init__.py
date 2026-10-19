@@ -1,0 +1,1 @@
+"""Training and evaluation scripts for the Amharic OCR project."""

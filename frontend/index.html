@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Amharic Handwriting OCR</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Amharic Handwriting OCR</h1>
+      <p>Recognize handwritten Amharic (Ethiopic) characters and short text lines from scans or photos.</p>
+    </header>
+
+    <div id="status" class="status status--idle">
+      <span id="status-icon">●</span>
+      <span id="status-text">Checking backend&hellip;</span>
+    </div>
+
+    <main>
+      <section class="card upload-card">
+        <div class="drop-zone" id="dropZone">
+          <p id="dropHint">Click to upload an image, or drag and drop</p>
+          <input type="file" id="fileInput" accept="image/png,image/jpeg,image/jpg,image/bmp,image/tiff" />
+          <div id="preview" class="preview hidden"></div>
+        </div>
+
+        <div class="controls">
+          <label class="control">
+            <span>Recognition mode</span>
+            <select id="modeSelect">
+              <option value="char">Isolated character (CNN)</option>
+              <option value="line">Short text line (CRNN + CTC)</option>
+            </select>
+          </label>
+          <button id="uploadBtn" class="btn btn--primary" disabled>Recognize</button>
+        </div>
+      </section>
+
+      <section class="card result-card hidden" id="resultCard">
+        <h2>Recognized text</h2>
+        <div class="result-wrapper">
+          <textarea id="resultText" readonly spellcheck="false"></textarea>
+          <div class="result-actions">
+            <button id="copyBtn" class="btn">Copy</button>
+            <button id="editBtn" class="btn btn--ghost">Edit</button>
+          </div>
+        </div>
+
+        <div class="meta">
+          <div class="meta-item">
+            <span class="meta-label">Mode</span>
+            <span id="metaMode">-</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Confidence</span>
+            <span id="metaConfidence">-</span>
+          </div>
+          <div class="meta-item">
+            <span class="meta-label">Prediction</span>
+            <span id="metaPrediction">-</span>
+          </div>
+          <div id="metaLowConf" class="meta-item meta-item--warn hidden">
+            <span class="meta-label">Notice</span>
+            <span id="metaLowConfText">Low confidence &mdash; result may be inaccurate.</span>
+          </div>
+        </div>
+
+        <div id="linesPanel" class="lines-panel hidden">
+          <h3>Detected lines</h3>
+          <div id="linesList"></div>
+        </div>
+
+        <div id="errorBox" class="error-box hidden"></div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Initial scope: handwritten Amharic images and short text lines. Severely degraded documents and highly connected handwriting are not reliably supported. See docs/LIMITS.md.</p>
+    </footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

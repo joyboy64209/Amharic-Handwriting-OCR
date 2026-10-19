@@ -1,0 +1,1 @@
+"""Model definitions: CNN baseline (isolated characters) and CRNN (line/CTC)."""

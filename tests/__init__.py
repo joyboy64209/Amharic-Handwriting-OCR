@@ -1,0 +1,1 @@
+"""Test suite for the Amharic OCR project (stdlib unittest only)."""
