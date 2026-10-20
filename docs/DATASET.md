@@ -32,25 +32,22 @@ text-line images, so there is nothing to copy. You must collect and label them
 yourself before the CRNN can be trained or line recognition used.
 
 ### Annotation format (`data/lines.jsonl`)
-
-One JSON-lines record per line image. Each line is two tab-separated fields:
-
-```
-<relative_image_path>\t<Amharic Unicode text>
-```
-
-Example:
-
-```
-lines/001.png	ሰላም
-lines/002.png	ኢትዮጵያ
-lines/003.png	ልዩ ትምህርት
+```json
+{"path": "data/lines/line_00001.png", "text": "ሰላም"}
+{"path": "data/lines/line_00002.png", "text": "ኢትዮጵያ"}
+{"path": "data/lines/line_00003.png", "text": "ልዩ ትምህርት"}
 ```
 
-- Field 1: path to the line image, relative to `data/lines/` (or an absolute
-  path).
-- Field 2: the ground-truth Amharic Unicode text for that line.
+- `path`: path to the line image, relative to the project root (e.g.
+  `data/lines/line_00001.png`) or an absolute path.
+- `text`: the ground-truth Amharic Unicode text for that line.
 - Encoding: UTF-8.
+
+You can generate synthetic line data with
+`python scripts/generate_synthetic_lines.py --num-lines 1000 --img-height 64`
+`--seed 42`, which writes images to `data/lines/` and annotations to
+`data/lines.jsonl`.
+
 
 ### Collecting and labeling instructions
 
@@ -59,7 +56,7 @@ lines/003.png	ልዩ ትምህርት
 2. Crop each image to a single text line and save it into `data/lines/`.
 3. Transcribe the line exactly as written, using standard Ethiopic Unicode
    characters (do not transliterate to Latin).
-4. Append one `path\ttext` record per line to `data/lines.jsonl`.
+4. Append one `{"path": "...", "text": "..."}` record per line to `data/lines.jsonl`.
 5. Run `python -m scripts.prepare_dataset` to validate, then
    `python -m scripts.train_crnn` to train the CRNN (wiring still to be
    completed once labeled data exists — see scripts/train_crnn.py).

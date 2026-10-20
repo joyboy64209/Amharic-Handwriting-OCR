@@ -7,7 +7,7 @@ Two dataset flavors:
    class; the folder name *is* the Unicode label.
 
 2. Labeled text-line images (``data/lines.jsonl``) — one record per line:
-   ``<relative_image_path>\\t<amharic unicode text>`` — for training/evaluating
+   ``{"path": "data/lines/line_00001.png", "text": "ሰላም"}`` — for training/evaluating
    the CRNN+CTC sequence recognizer.
 
 Dataset validation, train/validation splitting (writer-separated when a writer
@@ -353,20 +353,28 @@ class LineTextDataset(Dataset):
 
 
 def load_line_records(labels_file: Optional[Path] = None) -> List[Tuple[str, str]]:
-    """Load (relative_path, text) records from a JSONL labels file."""
+    """Load (relative_path, text) records from a JSONL labels file.
+
+    Each line is a JSON object: ``{"path": "data/lines/line_00001.png", "text": "ሰላም"}``.
+    """
     labels_file = labels_file or SETTINGS.data.line_labels_file
     records: List[Tuple[str, str]] = []
     if not labels_file.exists():
         return records
     with labels_file.open("r", encoding="utf-8") as fh:
         for raw in fh:
-            raw = raw.rstrip("\n")
-            if not raw.strip():
+            raw = raw.strip()
+            if not raw:
                 continue
-            parts = raw.split("\t", 1)
-            if len(parts) != 2:
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
                 continue
-            records.append((parts[0], parts[1]))
+            path = obj.get("path")
+            text = obj.get("text")
+            if path is None or text is None:
+                continue
+            records.append((str(path), str(text)))
     return records
 
 

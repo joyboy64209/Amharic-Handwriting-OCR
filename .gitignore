@@ -16,6 +16,7 @@ venv/
 # Data (large; keep the supplied dataset, ignore user additions)
 data/uni_dataset/**/*
 data/lines/**/*
+data/lines.jsonl
 data/split_manifest.json
 
 # OS
