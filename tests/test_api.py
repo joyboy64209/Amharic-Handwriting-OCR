@@ -15,9 +15,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import numpy as np
-import cv2
 import unittest
+
+import cv2
+import numpy as np
 from fastapi import HTTPException, status
 
 import src.api.app as app_module
@@ -74,7 +75,7 @@ class TestReadUpload(unittest.TestCase):
             file = FakeUploadFile("small.png", make_png_image())
             with self.assertRaises(HTTPException) as ctx:
                 app_module._read_upload(file)
-            self.assertEqual(ctx.exception.status_code, status.HTTP_413_REQUEST_ENTITY_TOO_LARGE)
+            self.assertEqual(ctx.exception.status_code, status.HTTP_413_CONTENT_TOO_LARGE)
             self.assertEqual(ctx.exception.detail["error"], "file_too_large")
         finally:
             app_module.SETTINGS.api.max_upload_bytes = old_limit

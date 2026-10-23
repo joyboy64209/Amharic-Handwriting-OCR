@@ -7,13 +7,22 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import numpy as np
-import cv2
 import unittest
 
+import cv2
+import numpy as np
+
 from src.preprocessing import (
-    to_grayscale, denoise, binarize, deskew, crop_to_content, crop_image,
-    normalize, resize, preprocess_for_cnn, detect_text_lines,
+    binarize,
+    crop_image,
+    crop_to_content,
+    denoise,
+    deskew,
+    detect_text_lines,
+    normalize,
+    preprocess_for_cnn,
+    resize,
+    to_grayscale,
 )
 
 

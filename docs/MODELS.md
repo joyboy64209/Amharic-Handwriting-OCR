@@ -53,8 +53,18 @@ CNN feature extractor (same 4 conv blocks as the baseline)
   (`beam_search_decode`, no language model).
 - Connected handwriting: the line is fed whole to the CRNN; characters are NOT
   cut apart, since segmentation of cursive Amharic is unreliable.
-- No pretrained CRNN checkpoint is supplied. Train once labeled line data is
-  available (see docs/DATASET.md).
+- Pretrained line checkpoint: `models/crnn_amharic_line.pth` (CRNN_CTC,
+  237 classes, input `(1, 28, 28)`, ~12.6 MB). Trained on the synthetic
+  `data/lines` dataset (2000 lines, 80/20 split). Note: the checkpoint is
+  intended as a starting point — synthetic data produces high validation CER
+  (initial ~1.0); collect real labeled line images per docs/DATASET.md to
+  continue training.
+- Input geometry: `preprocessing.img_height` (default 28); widths are variable
+  and padded on the right per batch. `input_shape` is `(1, 28, 28)` as the
+  canonical dims used for model construction.
+- Configurable via `config.yaml`: `models.crnn_checkpoint`,
+  `preprocessing.img_height`, `training.epochs`, `training.batch_size`,
+  `training.lr`, `training.val_split`.
 
 ## 3. Checkpoint format
 
@@ -65,6 +75,14 @@ Checkpoints saved by `scripts/train_cnn.py` contain:
 - `model_architecture`
 - `final_accuracy` (from the real validation run)
 - `val_split`, `split_strategy`, `writer_separated`, `epoch`
+
+Checkpoints saved by `scripts/train_crnn.py` contain:
+- `model_state_dict`
+- `class_to_idx` (char -> index, explicit vocabulary)
+- `input_shape`: (1, 28, 28)
+- `model_architecture`: "CRNN_CTC"
+- `final_cer`, `final_wer` (validation metrics)
+- `val_split`, `seed`, `epoch`, `num_lines`
 
 Model choice and checkpoint paths are configurable in `config.yaml` under
 `models.cnn_checkpoint` / `models.crnn_checkpoint`, and the API exposes model

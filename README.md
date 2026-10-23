@@ -96,6 +96,8 @@ Notes:
   Returns recognized Amharic Unicode text, confidence, top-k predictions
   (char mode) or per-line results (line mode), and clear errors for bad files
   or missing models.
+  - `?decoder=greedy|beam` — CTC decode strategy for line mode (default: `greedy`).
+  - `?beam_width=N` — beam size when `decoder=beam` (default: 10).
 
 ## Training & evaluation
 
@@ -118,7 +120,21 @@ what is missing until you provide it.
 
 ```powershell
 python -m unittest discover -s tests -v
+# or with pytest:
+python -m pytest tests -q
 ```
+
+### Linting
+
+```powershell
+python -m pip install -r requirements-dev.txt
+`ruff check .`
+```
+
+### Continuous integration
+
+GitHub Actions (`.github/workflows/ci.yml`) runs `ruff check .` and the test
+suite on every push and pull request to `main` and `amharic-ocr-upgrades`.
 
 ## Data & models you still need to supply
 

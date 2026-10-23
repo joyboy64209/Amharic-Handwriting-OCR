@@ -9,8 +9,14 @@ if str(ROOT) not in sys.path:
 
 import unittest
 
-from src.metrics import cer, wer, cer_wer_list, normalize_text
-from src.metrics import classification_metrics, confusion_matrix_from_lists
+from src.metrics import (
+    cer,
+    cer_wer_list,
+    classification_metrics,
+    confusion_matrix_from_lists,
+    normalize_text,
+    wer,
+)
 
 
 class TestCERWER(unittest.TestCase):

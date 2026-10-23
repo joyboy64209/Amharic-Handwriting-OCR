@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
 import tempfile
 import unittest
 
-from src.vocabulary import Vocabulary, FALLBACK_VOCAB
+from src.vocabulary import FALLBACK_VOCAB, Vocabulary
 
 
 class TestVocabulary(unittest.TestCase):

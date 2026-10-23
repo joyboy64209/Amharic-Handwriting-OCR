@@ -16,10 +16,12 @@ No metrics are claimed unless computed here from the actual val split.
 from __future__ import annotations
 
 import os
+import random
 import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -28,10 +30,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.config import SETTINGS
-from src.dataset import split_char_dataset, CharImageDataset, validate_char_dataset
+from src.dataset import CharImageDataset, split_char_dataset, validate_char_dataset
+from src.metrics import classification_metrics
 from src.models.cnn import AHCNN, build_model
 from src.vocabulary import Vocabulary
-from src.metrics import classification_metrics
 
 
 def train_one_epoch(model, loader, optimizer, criterion, device):
@@ -76,6 +78,14 @@ def main():
     print(f"[train_cnn] Device: {device}")
 
     cfg = SETTINGS
+    # Deterministic seeding for reproducibility.
+    seed = int(cfg.training.seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    print(f"[train_cnn] Seed: {seed}")
     vocab = Vocabulary.load(cfg.models.cnn_checkpoint)
     num_classes = vocab.size()
     print(f"[train_cnn] Vocabulary size: {num_classes} (source: {vocab.source})")
@@ -144,10 +154,15 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.training.lr)
     criterion = torch.nn.CrossEntropyLoss()
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="max", factor=0.5, patience=3, verbose=True
+    )
 
     best_val_acc = 0.0
     best_path = Path("models/amharic_ocr_v2_trained.pth")
     best_path.parent.mkdir(parents=True, exist_ok=True)
+    early_stop_patience = 5
+    epochs_since_improvement = 0
 
     t0 = time.time()
     for epoch in range(1, cfg.training.epochs + 1):
@@ -159,6 +174,7 @@ def main():
               f"val_acc={report.accuracy:.4f} val_f1={report.f1_macro:.4f}")
         if report.accuracy > best_val_acc:
             best_val_acc = report.accuracy
+            epochs_since_improvement = 0
             torch.save({
                 "model_state_dict": model.state_dict(),
                 "class_to_idx": {ch: i for i, ch in vocab.index_to_char.items()},
@@ -171,6 +187,13 @@ def main():
                 "epoch": epoch,
             }, str(best_path))
             print(f"   -> new best saved to {best_path} (val_acc={best_val_acc:.4f})")
+        else:
+            epochs_since_improvement += 1
+        scheduler.step(report.accuracy)
+        if epochs_since_improvement >= early_stop_patience:
+            print(f"[train_cnn] Early stopping: no improvement for "
+                  f"{early_stop_patience} epochs.")
+            break
 
     dt = time.time() - t0
     print(f"[train_cnn] Done in {dt:.1f}s. Best val accuracy: {best_val_acc:.4f}")

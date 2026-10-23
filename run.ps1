@@ -38,9 +38,9 @@ if (-not $check) {
     Write-Host "WARNING: backend import check failed (dependencies may be missing)." -ForegroundColor Yellow
 }
 
-$host = "127.0.0.1"
+$serverHost = "127.0.0.1"
 $port = 8000
-Write-Host "Starting Amharic OCR API at http://$host:$port ..." -ForegroundColor Green
+Write-Host "Starting Amharic OCR API at http://$serverHost`:$port ..." -ForegroundColor Gray
 Write-Host "Press Ctrl+C to stop.`n" -ForegroundColor Gray
 
-python -m uvicorn src.api.app:app --host $host --port $port --reload
+python -m uvicorn src.api.app:app --host $serverHost --port $port --reload

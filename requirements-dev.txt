@@ -1,0 +1,6 @@
+# Development dependencies for Amharic Handwriting OCR
+# Install alongside requirements.txt for linting and testing:
+#   python -m pip install -r requirements.txt -r requirements-dev.txt
+
+pytest>=8.0
+ruff>=0.8.0

@@ -13,7 +13,7 @@ intended to unblock CRNN + CTC line recognition until labeled line data is
 collected per docs/DATASET.md.
 
 Usage (PowerShell, from the project root):
-    python scripts/generate_synthetic_lines.py --num-lines 1000 --img-height 64 --seed 42
+    python scripts/generate_synthetic_lines.py --num-lines 1000 --img-height 28 --seed 42
 """
 
 from __future__ import annotations
@@ -288,7 +288,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--img-height",
         type=int,
-        default=64,
+        default=28,
         help="Target line height in pixels (glyphs scaled to this height).",
     )
     parser.add_argument(
@@ -392,8 +392,9 @@ def main() -> int:
 
             file_name = f"line_{i:05d}.png"
             out_path = output_dir / file_name
-            # Store path relative to project root for portability.
-            rel_path = f"data/lines/{file_name}"
+            # Store path relative to the line images dir (data/lines/),
+            # which LineTextDataset joins with images_dir.
+            rel_path = file_name
             line_img.save(out_path)
             af.write(json.dumps({"path": rel_path, "text": text}, ensure_ascii=False) + "\n")
             written += 1

@@ -8,8 +8,8 @@ image of the same size.
 
 from __future__ import annotations
 
-import numpy as np
 import cv2
+import numpy as np
 
 
 def _clip01(img: np.ndarray) -> np.ndarray:

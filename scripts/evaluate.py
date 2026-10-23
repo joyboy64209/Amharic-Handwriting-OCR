@@ -22,10 +22,10 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.config import SETTINGS
-from src.dataset import split_char_dataset, CharImageDataset, validate_char_dataset
+from src.dataset import CharImageDataset, split_char_dataset, validate_char_dataset
+from src.metrics import classification_metrics
 from src.models.cnn import build_model
 from src.vocabulary import Vocabulary
-from src.metrics import classification_metrics
 
 
 def main():
@@ -129,7 +129,7 @@ def main():
         print("   top confusions (true->pred: count):")
         for cnt, a, b in confusions[:10]:
             print(f"      {a} -> {b}: {cnt}")
-    print(f"[evaluate] Done.")
+    print("[evaluate] Done.")
     return 0
 
 

@@ -123,14 +123,19 @@ def validate_line_dataset(labels_file: Optional[Path] = None,
 
     with labels_file.open("r", encoding="utf-8") as fh:
         for lineno, raw in enumerate(fh, 1):
-            raw = raw.rstrip("\n")
-            if not raw.strip():
+            raw = raw.strip()
+            if not raw:
                 continue
-            parts = raw.split("\t", 1)
-            if len(parts) != 2:
-                errors.append(f"{labels_file}:{lineno} — expected 'path\\ttext'")
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                errors.append(f"{labels_file}:{lineno} — expected JSON object")
                 continue
-            rel_path, text = parts
+            rel_path = obj.get("path")
+            text = obj.get("text")
+            if rel_path is None or text is None:
+                errors.append(f"{labels_file}:{lineno} — missing 'path' or 'text'")
+                continue
             total += 1
             img_path = (images_dir / rel_path) if images_dir else Path(rel_path)
             if not img_path.exists():
@@ -300,8 +305,9 @@ class CharImageDataset(Dataset):
                     brightness_gain=float(self.augment_cfg.get("brightness", 0.15)),
                     seed=index,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"[dataset] Augmentation failed for {path} (seed={index}); "
+                      f"using unaugmented image. {exc}")
             arr = preprocess_for_cnn(
                 disp, self.img_height, self.img_width, self.mean, self.std,
                 max_skew_angle=45.0, return_intermediates=False,

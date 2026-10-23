@@ -7,11 +7,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import torch
 import unittest
 
+import torch
+
 from src.models.cnn import AHCNN
-from src.models.crnn import CRNN, greedy_decode, ctc_loss
+from src.models.crnn import CRNN, ctc_loss, greedy_decode
 
 
 class TestCNN(unittest.TestCase):

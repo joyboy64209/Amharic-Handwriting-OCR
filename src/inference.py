@@ -22,14 +22,15 @@ import numpy as np
 import torch
 
 from .config import SETTINGS
+from .models.cnn import AHCNN
+from .models.cnn import build_model as build_cnn
+from .models.crnn import CRNN, beam_search_decode, greedy_decode
 from .preprocessing import (
     detect_text_lines,
     preprocess_for_cnn,
     to_grayscale,
 )
 from .vocabulary import Vocabulary
-from .models.cnn import AHCNN, build_model as build_cnn
-from .models.crnn import CRNN, greedy_decode
 
 
 @dataclass
@@ -169,9 +170,15 @@ class OCRPredictor:
     # ------------------------------------------------------------------ #
     # Line (sequence) recognition
     # ------------------------------------------------------------------ #
-    def predict_line(self, image: np.ndarray) -> OCRResult:
+    def predict_line(self, image: np.ndarray, decoder: str = "greedy",
+                     beam_width: int = 10) -> OCRResult:
         cfg = self.config.preprocessing
         lines = detect_text_lines(image)
+
+        if decoder not in ("greedy", "beam"):
+            raise ValueError(f"Unknown decoder '{decoder}'; use 'greedy' or 'beam'.")
+        if decoder == "beam" and beam_width < 1:
+            raise ValueError("beam_width must be >= 1.")
 
         if not self.crnn_ready or self.crnn is None:
             if self.cnn_ready and self.cnn is not None:
@@ -209,7 +216,11 @@ class OCRPredictor:
 
             with torch.no_grad():
                 log_probs = self.crnn(tensor)
-            chars = greedy_decode(log_probs, blank=0)[0]
+            if decoder == "beam":
+                chars = beam_search_decode(log_probs, blank=0,
+                                           beam_width=beam_width)[0]
+            else:
+                chars = greedy_decode(log_probs, blank=0)[0]
             text = "".join(self.vocab.char_for_index(c) for c in chars)
             conf = self._line_confidence(log_probs[0], chars)
             recognized.append(text)
@@ -244,10 +255,12 @@ class OCRPredictor:
     # Unified entry point
     # ------------------------------------------------------------------ #
     def predict(self, image: np.ndarray, mode: Optional[str] = None,
-                return_intermediates: bool = False) -> OCRResult:
+                return_intermediates: bool = False,
+                decoder: str = "greedy", beam_width: int = 10) -> OCRResult:
         mode = mode or self.config.inference.default_mode
         if mode == "line":
-            return self.predict_line(image)
+            return self.predict_line(image, decoder=decoder,
+                                     beam_width=beam_width)
         try:
             pred = self.predict_char(image, return_intermediates=return_intermediates)
             return OCRResult(

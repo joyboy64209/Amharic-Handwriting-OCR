@@ -12,10 +12,10 @@ import random
 import unittest
 
 from scripts.generate_synthetic_lines import (
-    load_glyphs,
-    generate_text,
-    render_line,
     AMHARIC_WORDS,
+    generate_text,
+    load_glyphs,
+    render_line,
 )
 
 

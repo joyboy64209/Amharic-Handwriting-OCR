@@ -11,6 +11,7 @@ clear, structured errors. No 3D/visualization payloads are served.
 from __future__ import annotations
 
 import io
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -24,7 +25,19 @@ from fastapi.staticfiles import StaticFiles
 from src.config import SETTINGS
 from src.inference import OCRPredictor
 
-app = FastAPI(title="Amharic Handwriting OCR", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Load the OCR predictor once at startup (replaces on_event('startup'))."""
+    _load_predictor()
+    yield
+
+
+app = FastAPI(
+    title="Amharic Handwriting OCR",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -55,11 +68,6 @@ def _load_predictor() -> None:
     except Exception as exc:
         predictor_load_error = str(exc)
         print(f"[api] Predictor could not be initialized: {exc}")
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    _load_predictor()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -146,8 +154,14 @@ def health():
 
 
 @app.post("/ocr")
-async def ocr(file: UploadFile = File(...), mode: Optional[str] = None):
-    """Recognize Amharic text in an uploaded image."""
+async def ocr(file: UploadFile = File(...), mode: Optional[str] = None,
+              decoder: Optional[str] = None, beam_width: Optional[int] = None):
+    """Recognize Amharic text in an uploaded image.
+
+    ``decoder`` selects the CTC decode strategy for line mode:
+    ``"greedy"`` (default) or ``"beam"`` (prefix beam search). ``beam_width``
+    controls the beam size when ``decoder="beam"``.
+    """
     if predictor is None or predictor_load_error is not None:
         msg = predictor_load_error or (
             "No model loaded. "
@@ -187,7 +201,12 @@ async def ocr(file: UploadFile = File(...), mode: Optional[str] = None):
         )
 
     try:
-        result = predictor.predict(image, mode=mode)
+        result = predictor.predict(
+            image,
+            mode=mode,
+            decoder=decoder or "greedy",
+            beam_width=beam_width if beam_width is not None else 10,
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

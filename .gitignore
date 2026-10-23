@@ -14,7 +14,7 @@ venv/
 !models/amharic_ocr_v2.pth
 
 # Data (large; keep the supplied dataset, ignore user additions)
-data/uni_dataset/**/*
+# data/uni_dataset is tracked so `git clone` is self-contained for Colab.
 data/lines/**/*
 data/lines.jsonl
 data/split_manifest.json

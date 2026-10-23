@@ -17,8 +17,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.config import SETTINGS
-from src.dataset import (validate_char_dataset, validate_line_dataset,
-                         split_char_dataset, load_line_records)
+from src.dataset import (
+    load_line_records,
+    split_char_dataset,
+    validate_char_dataset,
+    validate_line_dataset,
+)
 from src.vocabulary import Vocabulary
 
 
@@ -52,8 +56,8 @@ def main():
         "num_val": len(manifest.val),
         "val_split": SETTINGS.training.val_split,
         "seed": SETTINGS.training.seed,
-        "train": [str(p) + "\t" + str(l) for p, l in manifest.train],
-        "val": [str(p) + "\t" + str(l) for p, l in manifest.val],
+        "train": [str(p) + "\t" + str(label) for p, label in manifest.train],
+        "val": [str(p) + "\t" + str(label) for p, label in manifest.val],
     }
     with manifest_path.open("w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, indent=2)

@@ -65,8 +65,8 @@ if ($LASTEXITCODE -ne 0) {
 
 $reqFile = Join-Path $ProjectRoot "requirements.txt"
 if (Test-Path $reqFile) {
-    python -m pip install --upgrade pip 2>$null | Out-Null
-    python -m pip install -r $reqFile
+    & $pyCmd -m pip install --upgrade pip 2>$null | Out-Null
+    & $pyCmd -m pip install -r $reqFile
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Dependency installation failed." -ForegroundColor Red
         exit 1
@@ -80,7 +80,7 @@ if (Test-Path $reqFile) {
 Write-Host "`nChecking expected files:" -ForegroundColor Cyan
 $checks = @(
     @{ p = "data/uni_dataset"; d = "isolated-character dataset" },
-    @{ p = "models/amharic_ocr_v2.pth"; d = "CNN checkpoint" },
+    @{ p = "models/amharic_ocr_v2.pth"; d = "CNN checkpoint" }
 )
 foreach ($c in $checks) {
     $full = Join-Path $ProjectRoot $c.p
