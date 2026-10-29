@@ -59,3 +59,52 @@ api:
   allowed_extensions: [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"]
   server_host: 127.0.0.1
   server_port: 8000
+
+# External dataset sources for the unified multi-dataset pipeline.
+# Keep original datasets unchanged; processed images/manifests are written
+# under data/ by scripts/download_datasets.py.
+data_sources:
+  # Local NumPy-based isolated-character dataset (32x32 grayscale, single
+  # Ethiopic char per sample). Path is configurable; default points at the
+  # user's local download.
+  local_char:
+    enabled: true
+    root: C:/Users/nahom/Desktop/train_char
+    x_file: x_train.npy
+    y_file: y_train.npy
+    task_type: char
+    # Output location for extracted PNG images + manifest.
+    image_dir: data/train_char
+    manifest_file: data/manifests/train_char.jsonl
+
+  # AHLD-29k: line-level handwritten Amharic (29,947 samples, parquet).
+  ahld29k:
+    enabled: true
+    repo_id: misiker/AHLD-29k
+    task_type: line
+    image_dir: data/ahld29k
+    manifest_file: data/manifests/ahld29k.jsonl
+    # Stream to avoid loading the 4.6 GB parquet into memory.
+    streaming: true
+
+  # Fidel Dataset: line-level Amharic (130,727 samples, ZIP + JSON labels).
+  fidel:
+    enabled: true
+    repo_id: upanzi/fidel-dataset
+    task_type: line
+    image_dir: data/fidel
+    manifest_file: data/manifests/fidel.jsonl
+    # Only keep handwritten samples for training; typed/synthetic can be
+    # included for line recognition but flagged by source/type.
+    include_handwritten: true
+    include_typed: false
+    include_synthetic: false
+
+# Unified manifest + split output locations.
+pipeline:
+  unified_manifest: data/manifests/unified.jsonl
+  split_dir: data/splits
+  # Writer-separated split when writer_id available, else stratified random.
+  val_split: 0.2
+  test_split: 0.1
+  seed: 42

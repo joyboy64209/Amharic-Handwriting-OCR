@@ -11,3 +11,7 @@ fastapi
 uvicorn[standard]
 python-multipart
 pyyaml
+# Hugging Face dataset loading (parquet + streaming) for AHLD-29k / Fidel.
+datasets>=2.14
+pyarrow>=14.0
+huggingface-hub>=0.20
