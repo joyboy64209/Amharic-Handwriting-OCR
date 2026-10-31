@@ -184,12 +184,15 @@ def load_ahld29k(cfg: dict) -> List[DatasetManifest]:
     repo_id = cfg["repo_id"]
     image_dir = Path(cfg["image_dir"])
     streaming = bool(cfg.get("streaming", True))
+    max_samples = cfg.get("max_samples", None)
 
     ds = load_dataset(repo_id, split="train", streaming=streaming)
 
     manifests: List[DatasetManifest] = []
     seen_md5: set = set()
     for idx, row in enumerate(ds):
+        if max_samples is not None and len(manifests) >= max_samples:
+            break
         image = row["image"]
         text = normalize_amharic(row.get("text", ""))
         file_name = row.get("file_name", f"ahld29k_{idx:06d}")
@@ -228,27 +231,34 @@ def load_ahld29k(cfg: dict) -> List[DatasetManifest]:
         )
     return manifests
 def load_fidel(cfg: dict) -> List[DatasetManifest]:
-    """Load the Fidel Dataset line-level dataset from HF ZIP + JSON labels.
+    """Load the Fidel Dataset line-level dataset from HF CSV labels.
 
-    Downloads the dataset repository via ``huggingface_hub``, extracts the
-    train/test ZIP archives, reads ``train_labels.json`` / ``test_labels.json``,
-    filters by source type according to config, and returns manifests.
+    Downloads only the label CSVs (train_labels.csv ~24 MB, test_labels.csv ~4 MB)
+    via ``huggingface_hub`` -- NOT the 12+ GB ZIP archives.  Images are stored
+    inside LFS-tracked ZIPs (train-clean.zip ~10.6 GB, test-clean.zip ~2.1 GB)
+    and cannot be selectively extracted without downloading whole ZIPs, so this
+    loader produces manifests with ``image_path`` pointing at expected locations
+    inside the downloaded repo but does **not** copy image files.
+
+    Callers must download/extract the ZIPs separately if they need the actual
+    images.  See ``scripts/download_datasets.py`` for the bounded download flow.
     """
     try:
-        from huggingface_hub import snapshot_download  # type: ignore
+        from huggingface_hub import hf_hub_download  # type: ignore
     except ImportError as exc:
         raise ImportError(
             "The `huggingface_hub` library is required to load Fidel. "
             "Install it with: pip install huggingface-hub"
         ) from exc
 
-    import zipfile
+    import csv
 
     repo_id = cfg["repo_id"]
     image_dir = Path(cfg["image_dir"])
     include_handwritten = bool(cfg.get("include_handwritten", True))
     include_typed = bool(cfg.get("include_typed", False))
     include_synthetic = bool(cfg.get("include_synthetic", False))
+    max_samples = cfg.get("max_samples", None)
 
     allowed_types = set()
     if include_handwritten:
@@ -258,93 +268,82 @@ def load_fidel(cfg: dict) -> List[DatasetManifest]:
     if include_synthetic:
         allowed_types.add("synthetic")
 
-    # Download the repo (small metadata + large ZIPs are LFS-tracked).
-    local_dir = Path(snapshot_download(repo_id=repo_id, repo_type="dataset"))
-
-    # Find label files.
-    label_files = {}
+    # Download only the label CSVs (not the 12+ GB ZIP archives).
+    label_files: Dict[str, Path] = {}
     for split in ("train", "test"):
-        p = local_dir / f"{split}_labels.json"
-        if p.exists():
-            label_files[split] = p
-        else:
-            # Also check zip-less layout.
-            alt = local_dir / split / f"{split}_labels.json"
-            if alt.exists():
-                label_files[split] = alt
+        try:
+            csv_path = hf_hub_download(
+                repo_id=repo_id,
+                filename=f"{split}_labels.csv",
+                repo_type="dataset",
+            )
+            label_files[split] = Path(csv_path)
+        except Exception:
+            # Split may not exist; skip silently.
+            continue
 
     if not label_files:
         raise FileNotFoundError(
-            f"No *_labels.json found in downloaded Fidel repo: {local_dir}"
+            f"No *_labels.csv found for Fidel repo: {repo_id}"
         )
 
     manifests: List[DatasetManifest] = []
     seen_md5: set = set()
+    total_written = 0
 
     for split, labels_path in label_files.items():
-        with labels_path.open("r", encoding="utf-8") as fh:
-            labels = json.load(fh)
-
-        # labels is a list of dicts: image_filename, line_text, type, writer
-        for entry in labels:
-            src_type = entry.get("type", "")
-            if src_type not in allowed_types:
-                continue
-
-            text = normalize_amharic(entry.get("line_text", ""))
-            if not text:
-                continue
-
-            img_filename = entry.get("image_filename", "")
-            if not img_filename:
-                continue
-
-            # Locate the image file (may be inside an extracted zip folder).
-            candidates = [
-                local_dir / img_filename,
-                local_dir / split / img_filename,
-                local_dir / f"{split}-clean" / img_filename,
-                local_dir / split / "clean" / img_filename,
-            ]
-            img_path = None
-            for c in candidates:
-                if c.exists():
-                    img_path = c
+        with labels_path.open("r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            for entry in reader:
+                if max_samples is not None and total_written >= max_samples:
                     break
-            if img_path is None:
-                # Image not yet extracted; skip rather than fabricate.
-                continue
 
-            # Duplicate check by file bytes.
-            img_bytes = img_path.read_bytes()
-            img_md5 = hashlib.md5(img_bytes).hexdigest()
-            if img_md5 in seen_md5:
-                continue
-            seen_md5.add(img_md5)
+                src_type = entry.get("type", "")
+                if src_type not in allowed_types:
+                    continue
 
-            # Copy (not move) into the pipeline image dir; keep original intact.
-            safe_name = f"fidel_{split}_{img_filename}"
-            out_path = image_dir / safe_name
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            if not out_path.exists():
-                shutil.copy2(img_path, out_path)
+                text = normalize_amharic(entry.get("line_text", ""))
+                if not text:
+                    continue
 
-            manifests.append(
-                DatasetManifest(
-                    image_path=str(out_path),
-                    label=text,
-                    source="fidel",
-                    task_type="line",
-                    writer_id=str(entry.get("writer"))
-                    if entry.get("writer") is not None
-                    else None,
-                    metadata={
-                        "split": split,
-                        "type": src_type,
-                        "file_name": img_filename,
-                    },
+                img_filename = entry.get("image_filename", "")
+                if not img_filename:
+                    continue
+
+                # Writer ID column may be empty for typed/synthetic samples.
+                writer_val = entry.get("writer", "") or None
+
+                # Images live inside LFS-tracked ZIPs; we cannot point to
+                # extracted files without downloading whole ZIPs.  Record the
+                # expected path inside the repo so callers know where images
+                # would live after extraction.
+                expected_path = str(image_dir / f"fidel_{split}_{img_filename}")
+
+                # Duplicate check by (filename, text) since we can't hash bytes.
+                dedupe_key = (img_filename, text)
+                if dedupe_key in seen_md5:
+                    continue
+                seen_md5.add(dedupe_key)
+
+                manifests.append(
+                    DatasetManifest(
+                        image_path=expected_path,
+                        label=text,
+                        source="fidel",
+                        task_type="line",
+                        writer_id=str(writer_val) if writer_val else None,
+                        metadata={
+                            "split": split,
+                            "type": src_type,
+                            "file_name": img_filename,
+                            "images_in_zip": True,
+                            "note": "Images are inside train-clean.zip / test-clean.zip; "
+                            "download ZIP separately to access actual files.",
+                        },
+                    )
                 )
-            )
+                total_written += 1
+
     return manifests
 
 
@@ -655,6 +654,120 @@ def print_quality_report(report: QualityReport, title: str = "Quality report") -
     print()
 
 
+# --------------------------------------------------------------------------- #
+# Manifest adapters for existing training scripts
+# --------------------------------------------------------------------------- #
+
+def manifests_to_char_records(
+    manifests: Sequence[DatasetManifest],
+    vocab,
+) -> Tuple[List[Tuple[Path, int]], int]:
+    """Convert char-task manifests to (image_path, class_index) tuples.
+
+    Compatible with ``CharImageDataset`` and ``split_char_dataset``.
+    Determines the actual number of classes from the data -- never
+    silently discards or maps to class zero.
+
+    Returns:
+        (records, actual_num_classes) where actual_num_classes is the number
+        of distinct labels found in the data.
+    """
+    records: List[Tuple[Path, int]] = []
+    seen_indices: set = set()
+    for m in manifests:
+        if m.task_type != "char":
+            continue
+        idx = vocab.index_for_char(m.label)
+        if idx is not None:
+            if idx not in seen_indices:
+                seen_indices.add(idx)
+                records.append((Path(m.image_path), idx))
+    actual_num_classes = len(seen_indices)
+    return records, actual_num_classes
+
+
+def manifests_to_line_records(
+    manifests: Sequence[DatasetManifest],
+) -> List[Tuple[str, str]]:
+    """Convert line-task manifests to (path_str, text) tuples.
+
+    Compatible with ``LineTextDataset`` and ``load_line_records``.
+    """
+    records: List[Tuple[str, str]] = []
+    for m in manifests:
+        if m.task_type != "line":
+            continue
+        records.append((m.image_path, m.label))
+    return records
+
+
+def split_char_manifests(
+    manifests: Sequence[DatasetManifest],
+    val_split: float,
+    test_split: float,
+    seed: int,
+) -> Tuple[
+    List[DatasetManifest],
+    List[DatasetManifest],
+    List[DatasetManifest],
+]:
+    """Split char manifests into train/val/test using writer-separated or
+    stratified random splitting, returning DatasetManifest lists.
+
+    Use :func:`manifests_to_char_records` to convert the results to
+    ``(Path, class_index)`` tuples for ``CharImageDataset``.
+    """
+    import random
+
+    rng = random.Random(seed)
+    manifests = list(manifests)
+
+    by_writer: Dict[str, List[DatasetManifest]] = defaultdict(list)
+    no_writer: List[DatasetManifest] = []
+    for m in manifests:
+        if m.writer_id:
+            by_writer[m.writer_id].append(m)
+        else:
+            no_writer.append(m)
+
+    if by_writer and len(by_writer) > 1:
+        writers = sorted(by_writer.keys())
+        rng.shuffle(writers)
+        n_writers = len(writers)
+        n_test = max(1, int(n_writers * test_split))
+        n_val = max(1, int(n_writers * val_split))
+        test_writers = set(writers[:n_test])
+        val_writers = set(writers[n_test : n_test + n_val])
+
+        train, val, test = [], [], []
+        for w in writers:
+            items = by_writer[w]
+            if w in test_writers:
+                test.extend(items)
+            elif w in val_writers:
+                val.extend(items)
+            else:
+                train.extend(items)
+        if no_writer:
+            train.extend(no_writer)
+    else:
+        # Stratified random by label.
+        by_label: Dict[str, List[DatasetManifest]] = defaultdict(list)
+        for m in manifests:
+            by_label[m.label].append(m)
+        train, val, test = [], [], []
+        for label, items in by_label.items():
+            rng.shuffle(items)
+            n = len(items)
+            n_test = max(0, int(n * test_split))
+            n_val = max(0, int(n * val_split))
+            test.extend(items[:n_test])
+            val.extend(items[n_test : n_test + n_val])
+            train.extend(items[n_test + n_val :])
+
+    return train, val, test
+
+
 __all__ = [
     "DatasetManifest",
     "normalize_amharic",
@@ -675,6 +788,9 @@ __all__ = [
     "validate_manifests",
     "QualityReport",
     "print_quality_report",
+    "manifests_to_char_records",
+    "manifests_to_line_records",
+    "split_char_manifests",
 ]
 
 
