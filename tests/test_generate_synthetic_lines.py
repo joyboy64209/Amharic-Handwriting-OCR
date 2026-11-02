@@ -21,13 +21,20 @@ from scripts.generate_synthetic_lines import (
 
 class TestGenerateSyntheticLines(unittest.TestCase):
 
+    def _glyphs_available(self) -> bool:
+        return Path("data/uni_dataset").exists()
+
     def test_load_glyphs(self):
+        if not self._glyphs_available():
+            self.skipTest("data/uni_dataset not present in this clone")
         glyphs = load_glyphs(Path("data/uni_dataset"))
         self.assertGreaterEqual(len(glyphs), 237)
         self.assertIn("ሀ", glyphs)
         self.assertGreater(len(glyphs["ሀ"]), 0)
 
     def test_generate_text_uses_available_chars(self):
+        if not self._glyphs_available():
+            self.skipTest("data/uni_dataset not present in this clone")
         glyphs = load_glyphs(Path("data/uni_dataset"))
         rng = random.Random(42)
         text = generate_text(rng, glyphs, min_chars=5, max_chars=20, use_words=False)
@@ -36,6 +43,8 @@ class TestGenerateSyntheticLines(unittest.TestCase):
             self.assertIn(ch, available)
 
     def test_render_line_produces_image(self):
+        if not self._glyphs_available():
+            self.skipTest("data/uni_dataset not present in this clone")
         glyphs = load_glyphs(Path("data/uni_dataset"))
         rng = random.Random(7)
         img = render_line(
@@ -54,6 +63,8 @@ class TestGenerateSyntheticLines(unittest.TestCase):
         self.assertEqual(img.height, 64)
 
     def test_render_line_skips_unknown_chars(self):
+        if not self._glyphs_available():
+            self.skipTest("data/uni_dataset not present in this clone")
         glyphs = load_glyphs(Path("data/uni_dataset"))
         rng = random.Random(1)
         img = render_line(

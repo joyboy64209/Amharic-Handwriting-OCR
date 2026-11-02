@@ -2,7 +2,7 @@
 
 Reads labeled line images from ``data/lines.jsonl`` (format:
 ``{"path": "data/lines/line_00001.png", "text": "ሰላም"}``), splits them into
-train/validation, trains a CRNN with CTC loss, and saves a checkpoint to
+train/validation/test, trains a CRNN with CTC loss, and saves a checkpoint to
 ``models/crnn_amharic_line.pth``.
 
 Generate synthetic line data first if you have no real labels:
@@ -14,12 +14,14 @@ Usage (PowerShell, from the project root):
 
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -34,6 +36,25 @@ from src.dataset import (
 from src.metrics import cer_wer_list
 from src.models.crnn import CRNN, ctc_loss, greedy_decode
 from src.vocabulary import Vocabulary
+
+
+def atomic_torch_save(obj: dict, path: Path) -> None:
+    """Atomically save a PyTorch object to ``path`` (write to temp, then rename)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            torch.save(obj, fh)
+        os.replace(tmp_name, str(path))
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def collate_fn(batch):
@@ -182,14 +203,34 @@ def main():
         print("[train_crnn] No records in line dataset. Aborting.")
         return 1
 
-    n_val = max(1, int(len(full_ds) * SETTINGS.training.val_split))
-    n_train = len(full_ds) - n_val
-    train_ds, val_ds = random_split(
-        full_ds,
-        [n_train, n_val],
-        generator=torch.Generator().manual_seed(SETTINGS.training.seed),
-    )
-    print(f"[train_crnn] Split: train={len(train_ds)}, val={len(val_ds)}")
+    # Small-dataset guard.
+    if len(full_ds) < 3:
+        print("[train_crnn] Error: fewer than 3 line samples; "
+              "cannot create train/val/test splits.")
+        return 1
+
+    val_split = SETTINGS.training.val_split
+    test_split = 0.1
+    n_test = max(1, int(len(full_ds) * test_split))
+    n_val = max(1, int(len(full_ds) * val_split))
+    n_train = len(full_ds) - n_val - n_test
+    if n_train < 1:
+        # Not enough for a 3-way split; shrink val/test.
+        n_val = max(1, (len(full_ds) - 1) // 2)
+        n_test = max(1, len(full_ds) - 1 - n_val)
+        n_train = len(full_ds) - n_val - n_test
+
+    rng = torch.Generator().manual_seed(SETTINGS.training.seed)
+    perm = torch.randperm(len(full_ds), generator=rng).tolist()
+    test_idx = perm[:n_test]
+    val_idx = perm[n_test : n_test + n_val]
+    train_idx = perm[n_test + n_val :]
+
+    from torch.utils.data import Subset
+    train_ds = Subset(full_ds, train_idx)
+    val_ds = Subset(full_ds, val_idx)
+    test_ds = Subset(full_ds, test_idx)
+    print(f"[train_crnn] Split: train={len(train_ds)}, val={len(val_ds)}, test={len(test_ds)}")
 
     train_loader = DataLoader(
         train_ds,
@@ -200,6 +241,13 @@ def main():
     )
     val_loader = DataLoader(
         val_ds,
+        batch_size=SETTINGS.training.batch_size,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=collate_fn,
+    )
+    test_loader = DataLoader(
+        test_ds,
         batch_size=SETTINGS.training.batch_size,
         shuffle=False,
         num_workers=0,
@@ -228,7 +276,7 @@ def main():
 
         if val_cer < best_val_cer:
             best_val_cer = val_cer
-            torch.save({
+            atomic_torch_save({
                 "model_state_dict": model.state_dict(),
                 "class_to_idx": {ch: i for i, ch in vocab.index_to_char.items()},
                 "input_shape": (1, SETTINGS.preprocessing.img_height, SETTINGS.preprocessing.img_width),
@@ -239,12 +287,35 @@ def main():
                 "seed": SETTINGS.training.seed,
                 "epoch": epoch,
                 "num_lines": len(records),
-            }, str(best_path))
+                "num_classes": num_classes,
+                "preprocessing": {
+                    "img_height": SETTINGS.preprocessing.img_height,
+                    "mean": SETTINGS.preprocessing.mean,
+                    "std": SETTINGS.preprocessing.std,
+                },
+            }, best_path)
             print(f"   -> new best saved to {best_path} (val_cer={best_val_cer:.4f})")
 
     dt = time.time() - t0
     print(f"[train_crnn] Done in {dt:.1f}s. Best val CER: {best_val_cer:.4f}")
     print(f"[train_crnn] Best checkpoint: {best_path}")
+
+    # Evaluate the best checkpoint on the held-out test split.
+    if len(test_ds) > 0:
+        print("[train_crnn] Evaluating best checkpoint on test split...")
+        test_model = CRNN(
+            num_classes=num_classes,
+            img_height=SETTINGS.preprocessing.img_height,
+        ).to(device)
+        test_ckpt = torch.load(best_path, map_location=device)
+        if isinstance(test_ckpt, dict) and "model_state_dict" in test_ckpt:
+            test_ckpt = test_ckpt["model_state_dict"]
+        test_model.load_state_dict(test_ckpt)
+        test_model.eval()
+        test_loss, test_cer, test_wer = evaluate(test_model, test_loader, device, vocab)
+        print(f"[train_crnn] TEST: loss={test_loss:.4f} CER={test_cer:.4f} WER={test_wer:.4f}")
+        print("[train_crnn] Test metrics are on held-out data; do not tune hyperparameters on them.")
+
     return 0
 
 

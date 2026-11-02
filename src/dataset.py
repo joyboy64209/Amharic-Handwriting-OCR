@@ -162,6 +162,7 @@ def validate_line_dataset(labels_file: Optional[Path] = None,
 class SplitManifest:
     train: List[Tuple[Path, int]]
     val: List[Tuple[Path, int]]
+    test: List[Tuple[Path, int]]
     strategy: str
     writer_separated: bool
     num_classes: int
@@ -174,22 +175,24 @@ def _writer_id(path: Path) -> Optional[str]:
 
 def split_char_dataset(root: Optional[Path] = None,
                        val_split: Optional[float] = None,
+                       test_split: Optional[float] = None,
                        seed: Optional[int] = None,
                        vocab: Optional[Vocabulary] = None
                        ) -> SplitManifest:
-    """Build train/val splits for the character dataset.
+    """Build train/val/test splits for the character dataset.
 
     Strategy:
       * Writer-separated if every image filename starts with a numeric writer
         id (e.g. ``001he.1.jpg`` -> writer ``001``). All images from a writer
-        go entirely to train or val — no writer leakage across splits.
+        go entirely to one split — no writer leakage across splits.
       * Otherwise stratified random per class; documented limitation that the
         split is not writer-separated.
 
-    Returns (train, val) lists of (image_path, class_index).
+    Returns (train, val, test) lists of (image_path, class_index).
     """
     root = root or SETTINGS.data.char_dataset_dir
     val_split = SETTINGS.training.val_split if val_split is None else val_split
+    test_split = SETTINGS.pipeline.test_split if test_split is None else test_split
     seed = SETTINGS.training.seed if seed is None else seed
     vocab = vocab or Vocabulary.load(SETTINGS.models.cnn_checkpoint)
 
@@ -202,6 +205,7 @@ def split_char_dataset(root: Optional[Path] = None,
 
     train: List[Tuple[Path, int]] = []
     val: List[Tuple[Path, int]] = []
+    test: List[Tuple[Path, int]] = []
     writer_separated = False
 
     sample_writer_ids = set()
@@ -227,10 +231,22 @@ def split_char_dataset(root: Optional[Path] = None,
                 writer_to_items.setdefault(wid, []).append((p, idx))
         writers = sorted(writer_to_items.keys())
         rng.shuffle(writers)
-        n_val = max(1, int(len(writers) * val_split))
-        val_writers = set(writers[:n_val])
+        n_writers = len(writers)
+        n_test = max(0, int(n_writers * test_split)) if test_split > 0 else 0
+        n_val = max(1, int(n_writers * val_split)) if val_split > 0 else 0
+        # Ensure at least one writer remains for training.
+        if n_test + n_val >= n_writers:
+            n_val = max(1, n_writers - n_test - 1) if n_writers - n_test - 1 > 0 else 0
+            n_test = max(0, n_writers - n_val - 1) if n_writers - n_val - 1 > 0 else 0
+        test_writers = set(writers[:n_test])
+        val_writers = set(writers[n_test:n_test + n_val])
         for wid, items in writer_to_items.items():
-            target = val if wid in val_writers else train
+            if wid in test_writers:
+                target = test
+            elif wid in val_writers:
+                target = val
+            else:
+                target = train
             target.extend(items)
     else:
         writer_separated = False
@@ -239,17 +255,24 @@ def split_char_dataset(root: Optional[Path] = None,
             items = [p for p in class_dir.iterdir()
                      if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")]
             rng.shuffle(items)
-            n_val = max(1, int(len(items) * val_split)) if len(items) > 1 else 0
-            for p in items[:n_val]:
-                val.append((p, idx))
-            for p in items[n_val:]:
-                train.append((p, idx))
+            n = len(items)
+            n_test = max(0, int(n * test_split)) if test_split > 0 else 0
+            n_val = max(0, int(n * val_split)) if val_split > 0 else 0
+            # Guard: don't consume all samples.
+            if n_test + n_val >= n:
+                n_val = max(0, n - n_test - 1)
+                n_test = max(0, n - n_val - 1)
+            test.extend(items[:n_test])
+            val.extend(items[n_test:n_test + n_val])
+            train.extend(items[n_test + n_val:])
         rng.shuffle(train)
         rng.shuffle(val)
+        rng.shuffle(test)
 
     return SplitManifest(
         train=train,
         val=val,
+        test=test,
         strategy="writer-separated" if writer_separated else "stratified-random",
         writer_separated=writer_separated,
         num_classes=len(label_to_idx),
@@ -320,19 +343,63 @@ class LineTextDataset(Dataset):
     """PyTorch Dataset for labeled text-line images (JSONL).
 
     Items: (image_tensor, label_string, label_indices) for CTC training.
+
+    Raises FileNotFoundError if a referenced image is missing or unreadable,
+    and ValueError if a label contains characters outside the vocabulary.
+    Nothing is silently substituted or dropped.
     """
 
     def __init__(self, records: Sequence[Tuple[str, str]],
                  vocab: Vocabulary,
                  img_height: int = 28,
                  mean: float = 0.239, std: float = 0.407,
-                 images_dir: Optional[Path] = None):
+                 images_dir: Optional[Path] = None,
+                 strict: bool = True):
         self.records = list(records)
         self.vocab = vocab
         self.img_height = img_height
         self.mean = mean
         self.std = std
         self.images_dir = images_dir or SETTINGS.data.line_images_dir
+        self.strict = strict
+        # Pre-validate all records so failures surface at dataset construction
+        # rather than deep inside a training loop.
+        if strict:
+            self._validate_records()
+
+    def _validate_records(self) -> None:
+        missing: List[str] = []
+        unreadable: List[str] = []
+        unknown_chars: List[str] = []
+        for index, (rel_path, text) in enumerate(self.records):
+            img_path = (self.images_dir / rel_path) if not os.path.isabs(rel_path) else Path(rel_path)
+            if not img_path.exists():
+                missing.append(str(img_path))
+                continue
+            image = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
+            if image is None:
+                unreadable.append(str(img_path))
+                continue
+            for ch in text:
+                if ch != " " and self.vocab.index_for_char(ch) is None:
+                    unknown_chars.append(f"{rel_path}: '{ch}' (U+{ord(ch):04X})")
+        if missing:
+            raise FileNotFoundError(
+                f"LineTextDataset: {len(missing)} image(s) not found. "
+                f"Examples: {missing[:5]}"
+            )
+        if unreadable:
+            raise ValueError(
+                f"LineTextDataset: {len(unreadable)} image(s) unreadable. "
+                f"Examples: {unreadable[:5]}"
+            )
+        if unknown_chars:
+            raise ValueError(
+                f"LineTextDataset: {len(unknown_chars)} label character(s) "
+                f"not in vocabulary. Examples: {unknown_chars[:5]}. "
+                f"Ensure labels only use characters present in the model "
+                f"vocabulary ({self.vocab.size()} classes)."
+            )
 
     def __len__(self) -> int:
         return len(self.records)
@@ -342,6 +409,11 @@ class LineTextDataset(Dataset):
         img_path = (self.images_dir / rel_path) if not os.path.isabs(rel_path) else Path(rel_path)
         image = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
         if image is None:
+            if self.strict:
+                raise FileNotFoundError(
+                    f"LineTextDataset: cannot read image {img_path}"
+                )
+            # Non-strict mode: return a blank tensor and an empty target.
             image = np.zeros((self.img_height, self.img_height), dtype=np.uint8)
         h, w = image.shape[:2]
         scale = self.img_height / max(h, 1)
@@ -353,7 +425,12 @@ class LineTextDataset(Dataset):
         tensor = torch.from_numpy(arr).unsqueeze(0)
 
         indices = [self.vocab.index_for_char(ch) for ch in text]
-        indices = [i for i in indices if i is not None]
+        missing_chars = [ch for ch in text if ch != " " and self.vocab.index_for_char(ch) is None]
+        if missing_chars:
+            raise ValueError(
+                f"LineTextDataset: label '{text}' contains characters not in "
+                f"vocabulary: {missing_chars}"
+            )
         target = torch.tensor([i + 1 for i in indices], dtype=torch.long)
         return tensor, text, target
 

@@ -1,8 +1,7 @@
 """Train the CNN baseline for isolated Amharic characters.
 
 Usage (PowerShell, from the project root):
-    py -3 -m scripts.train_cnn        # uses python 3.15 (no pip here; see setup.ps1)
-    python -m scripts.train_cnn       # if python 3.12 with deps is on PATH
+    python -m scripts.train_cnn
 
 Reads config.yaml. Splits data/uni_dataset (writer-separated when writer ids
 are present in filenames), trains, and saves:
@@ -18,6 +17,7 @@ from __future__ import annotations
 import os
 import random
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -34,6 +34,30 @@ from src.dataset import CharImageDataset, split_char_dataset, validate_char_data
 from src.metrics import classification_metrics
 from src.models.cnn import AHCNN, build_model
 from src.vocabulary import Vocabulary
+
+
+def atomic_torch_save(obj: dict, path: Path) -> None:
+    """Atomically save a PyTorch object to ``path``.
+
+    Writes to a temporary file in the same directory, then renames.  This
+    prevents a partial checkpoint from being left behind if the process is
+    interrupted during ``torch.save``.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            torch.save(obj, fh)
+        os.replace(tmp_name, str(path))
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def train_one_epoch(model, loader, optimizer, criterion, device):
@@ -104,13 +128,35 @@ def main():
         print(f"[train_cnn] Warning: classes with <10 samples: "
               f"{val_report.missing_classes[:8]}...")
 
+    # Small-dataset guard: need at least 3 samples for train/val/test.
+    if val_report.total_images < 3:
+        print("[train_cnn] Error: dataset has fewer than 3 images; "
+              "cannot create train/val/test splits.")
+        print("[train_cnn] Aborting. Add more data or reduce split ratios.")
+        return 1
+
     manifest = split_char_dataset(
         vocab=vocab,
         val_split=cfg.training.val_split,
         seed=cfg.training.seed,
     )
-    print(f"[train_cnn] Split strategy: {manifest.strategy} "
-          f"(writer_separated={manifest.writer_separated})")
+    # Validate labels against the vocabulary before training.
+    unknown: set = set()
+    for path, label_idx in list(manifest.train) + list(manifest.val):
+        ch = vocab.char_for_index(int(label_idx))
+        if ch == "?":
+            unknown.add(f"index {label_idx}")
+    if unknown:
+        print("[train_cnn] Error: labels not in vocabulary:")
+        for u in sorted(unknown)[:10]:
+            print("   -", u)
+        print("[train_cnn] Aborting. Update labels or vocabulary before "
+              "training.")
+        return 1
+
+    print(f"[train_cnn] Split: {manifest.strategy} "
+          f"(writer_separated={manifest.writer_separated}), "
+          f"test_split handled by prepare_dataset (3-way split)")
     print(f"[train_cnn] train={len(manifest.train)}  val={len(manifest.val)}")
 
     train_ds = CharImageDataset(
@@ -175,7 +221,7 @@ def main():
         if report.accuracy > best_val_acc:
             best_val_acc = report.accuracy
             epochs_since_improvement = 0
-            torch.save({
+            atomic_torch_save({
                 "model_state_dict": model.state_dict(),
                 "class_to_idx": {ch: i for i, ch in vocab.index_to_char.items()},
                 "input_shape": (1, cfg.preprocessing.img_height, cfg.preprocessing.img_width),
@@ -184,8 +230,16 @@ def main():
                 "val_split": cfg.training.val_split,
                 "split_strategy": manifest.strategy,
                 "writer_separated": manifest.writer_separated,
+                "seed": seed,
                 "epoch": epoch,
-            }, str(best_path))
+                "num_classes": num_classes,
+                "preprocessing": {
+                    "img_height": cfg.preprocessing.img_height,
+                    "img_width": cfg.preprocessing.img_width,
+                    "mean": cfg.preprocessing.mean,
+                    "std": cfg.preprocessing.std,
+                },
+            }, best_path)
             print(f"   -> new best saved to {best_path} (val_acc={best_val_acc:.4f})")
         else:
             epochs_since_improvement += 1

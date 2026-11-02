@@ -67,7 +67,15 @@ def _coerce(val: str) -> Any:
 # Project paths
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# Allow the project root to be overridden via environment variable so the
+# same config works when the repo is cloned to a different location or the
+# commands are run from a different working directory.
+_ENV_PROJECT_ROOT = os.environ.get("PROJECT_ROOT", "").strip()
+if _ENV_PROJECT_ROOT:
+    PROJECT_ROOT = Path(_ENV_PROJECT_ROOT).resolve()
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
 CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 
 _RAW: Dict[str, Any] = _load_yaml(CONFIG_PATH)
@@ -83,7 +91,24 @@ def _get(d: Dict[str, Any], *keys: str, default: Any = None) -> Any:
 
 
 def _resolve(rel: str) -> Path:
-    return (PROJECT_ROOT / rel).resolve()
+    """Resolve a path relative to the project root.
+
+    If the value is already absolute, return it as-is. Otherwise join it with
+    PROJECT_ROOT. This keeps behavior consistent whether the command is run
+    from the repository root or another working directory.
+    """
+    p = Path(rel)
+    if p.is_absolute():
+        return p.resolve()
+    return (PROJECT_ROOT / p).resolve()
+
+
+def _resolve_env_or_rel(env_var: str, rel: str) -> Path:
+    """Resolve a path: env var override > relative config value > project-root relative."""
+    env_val = os.environ.get(env_var, "").strip()
+    if env_val:
+        return Path(env_val).resolve()
+    return _resolve(rel)
 
 
 # ---------------------------------------------------------------------------
@@ -93,15 +118,15 @@ def _resolve(rel: str) -> Path:
 
 @dataclass
 class DataConfig:
-    char_dataset_dir: Path = field(default_factory=lambda: _resolve(_get(_RAW, "data", "char_dataset_dir", default="data/uni_dataset")))
-    line_labels_file: Path = field(default_factory=lambda: _resolve(_get(_RAW, "data", "line_labels_file", default="data/lines.jsonl")))
-    line_images_dir: Path = field(default_factory=lambda: _resolve(_get(_RAW, "data", "line_images_dir", default="data/lines")))
+    char_dataset_dir: Path = field(default_factory=lambda: _resolve_env_or_rel("DATA_CHAR_ROOT", _get(_RAW, "data", "char_dataset_dir", default="data/uni_dataset")))
+    line_labels_file: Path = field(default_factory=lambda: _resolve_env_or_rel("DATA_LINE_LABELS", _get(_RAW, "data", "line_labels_file", default="data/lines.jsonl")))
+    line_images_dir: Path = field(default_factory=lambda: _resolve_env_or_rel("DATA_LINE_IMAGES", _get(_RAW, "data", "line_images_dir", default="data/lines")))
 
 
 @dataclass
 class ModelConfig:
-    cnn_checkpoint: Path = field(default_factory=lambda: _resolve(_get(_RAW, "models", "cnn_checkpoint", default="models/amharic_ocr_v2.pth")))
-    crnn_checkpoint: Path = field(default_factory=lambda: _resolve(_get(_RAW, "models", "crnn_checkpoint", default="models/crnn_amharic_line.pth")))
+    cnn_checkpoint: Path = field(default_factory=lambda: _resolve_env_or_rel("CNN_CHECKPOINT", _get(_RAW, "models", "cnn_checkpoint", default="models/amharic_ocr_v2.pth")))
+    crnn_checkpoint: Path = field(default_factory=lambda: _resolve_env_or_rel("CRNN_CHECKPOINT", _get(_RAW, "models", "crnn_checkpoint", default="models/crnn_amharic_line.pth")))
 
 
 @dataclass
@@ -133,6 +158,15 @@ class InferenceConfig:
 
 
 @dataclass
+class PipelineConfig:
+    seed: int = 42
+    split_dir: str = "data/splits"
+    test_split: float = 0.1
+    unified_manifest: str = "data/manifests/unified.jsonl"
+    val_split: float = 0.2
+
+
+@dataclass
 class ApiConfig:
     max_upload_bytes: int = int(_get(_RAW, "api", "max_upload_bytes", default=2097152))
     allowed_extensions: List[str] = field(default_factory=lambda: list(_get(_RAW, "api", "allowed_extensions", default=[".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"])))
@@ -148,6 +182,7 @@ class Settings:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
+    pipeline: PipelineConfig = field(default_factory=PipelineConfig)
 
 
 SETTINGS = Settings()

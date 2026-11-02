@@ -10,7 +10,7 @@ api:
   server_host: 127.0.0.1
   server_port: 8000
 data:
-  char_dataset_dir: data/uni_dataset
+  char_dataset_dir: data/char_dataset
   line_images_dir: data/lines
   line_labels_file: data/lines.jsonl
 data_sources:
@@ -34,7 +34,6 @@ data_sources:
     enabled: true
     image_dir: data/train_char
     manifest_file: data/manifests/train_char.jsonl
-    root: C:/Users/nahom/Desktop/train_char/train_char
     task_type: char
     x_file: x_train.npy
     y_file: y_train.npy

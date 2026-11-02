@@ -101,7 +101,28 @@ class OCRPredictor:
                 state = torch.load(ckpt, map_location=self.device)
                 if isinstance(state, dict) and "model_state_dict" in state:
                     state = state["model_state_dict"]
-                self.crnn.load_state_dict(state, strict=False)
+                # Validate compatibility: load with strict=True first, then
+                # report missing/unexpected keys explicitly instead of silently
+                # ignoring them with strict=False.
+                try:
+                    self.crnn.load_state_dict(state, strict=True)
+                except RuntimeError as exc:
+                    missing = []
+                    unexpected = []
+                    for part in str(exc).split("\n"):
+                        part = part.strip()
+                        if part.startswith("missing keys:"):
+                            missing = [k.strip() for k in
+                                       part.split(":", 1)[1].strip("[] ").split(",") if k.strip()]
+                        elif part.startswith("unexpected keys:"):
+                            unexpected = [k.strip() for k in
+                                          part.split(":", 1)[1].strip("[] ").split(",") if k.strip()]
+                    raise RuntimeError(
+                        f"CRNN checkpoint {ckpt} is incompatible with the "
+                        f"current model architecture. "
+                        f"Missing keys: {missing}. Unexpected keys: {unexpected}. "
+                        f"Original error: {exc}"
+                    ) from exc
                 self.crnn.to(self.device)
                 self.crnn.eval()
                 self.crnn_ready = True
@@ -181,18 +202,6 @@ class OCRPredictor:
             raise ValueError("beam_width must be >= 1.")
 
         if not self.crnn_ready or self.crnn is None:
-            if self.cnn_ready and self.cnn is not None:
-                try:
-                    pred = self.predict_char(image, return_intermediates=True)
-                    return OCRResult(
-                        mode="char-fallback",
-                        text=pred.char,
-                        confidence=pred.confidence,
-                        char_predictions=[pred],
-                    )
-                except Exception as exc:
-                    return OCRResult(mode="line", text="", confidence=0.0,
-                                     error=str(exc))
             return OCRResult(
                 mode="line", text="", confidence=0.0,
                 error=self.missing_model_message("line"),
